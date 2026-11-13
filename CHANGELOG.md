@@ -32,6 +32,12 @@ All notable changes to this project are documented here. The format follows
 - Type mapping to DuckDB types: `bigint` precision to `TINYINT`…`HUGEINT`, timestamps with a zone
   to `TIMESTAMP WITH TIME ZONE` and without one to `TIMESTAMP_S`, `TIMESTAMP_MS`, `TIMESTAMP` or
   `TIMESTAMP_NS` by precision, `time` to `TIME`, `json` to `JSON`, `wei` to `DECIMAL(38,0)`.
+- Nothing stored depends on a time zone, the client's or the server's, and both load paths store
+  the same value. A `time` column is always `TIME` (its `timezone` hint has no effect: Parquet
+  and Arrow can't carry a time's offset, and the server would attach its session's): a value's
+  clock reading is stored, its offset dropped. Fractional seconds beyond a timestamp or time
+  column's `precision` are cut, not rounded, by `INSERT` statements as by Parquet files. Tested
+  from clients and into servers in UTC, New York and Kolkata.
 - The catalog is the URL's path (`hardcharger://host/lake`), the dataset a schema in it; a URL
   without a catalog works in the server's default one.
 - Capabilities that match the server: DuckDB SQL for `pipeline.dataset()` reads (sqlglot dialect

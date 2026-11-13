@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import datetime
 from typing import Any
 
 import pytest
@@ -45,10 +46,16 @@ DDL = [
     ({"data_type": "timestamp", "timezone": False, "precision": 3}, "TIMESTAMP_MS"),
     ({"data_type": "timestamp", "timezone": False, "precision": 6}, "TIMESTAMP"),
     ({"data_type": "timestamp", "timezone": False, "precision": 9}, "TIMESTAMP_NS"),
-    # A time of day has no zone unless the column asks for one.
+    # A time of day has no zone, whatever the hint: TIME WITH TIME ZONE would store the
+    # server's session offset with every value that arrives without one (all of them, in a
+    # Parquet file).
     ({"data_type": "time"}, "TIME"),
     ({"data_type": "time", "timezone": False}, "TIME"),
-    ({"data_type": "time", "timezone": True}, "TIME WITH TIME ZONE"),
+    ({"data_type": "time", "timezone": True}, "TIME"),
+    ({"data_type": "time", "precision": 3}, "TIME"),
+    ({"data_type": "timestamp", "precision": 0}, "TIMESTAMP WITH TIME ZONE"),
+    ({"data_type": "timestamp", "timezone": False, "precision": 2}, "TIMESTAMP_MS"),
+    ({"data_type": "timestamp", "timezone": False, "precision": 5}, "TIMESTAMP"),
 ]
 
 
@@ -80,6 +87,54 @@ def test_a_precision_no_type_holds_is_refused(column: dict[str, Any], message: s
     with pytest.raises(TerminalValueError) as raised:
         _ddl(column=column)
     assert message in str(raised.value)
+
+
+SENT = datetime.datetime(2026, 7, 4, 10, 20, 30, 987654)
+CUT = [
+    # dlt's Parquet writer keeps seconds for precision 0, milliseconds up to 3, and drops the
+    # rest. An INSERT must send the same: the server would keep or round the extra digits.
+    ({"data_type": "timestamp", "precision": 0}, SENT.replace(microsecond=0)),
+    ({"data_type": "timestamp", "precision": 3}, SENT.replace(microsecond=987000)),
+    ({"data_type": "timestamp", "precision": 6}, SENT),
+    ({"data_type": "timestamp"}, SENT),
+    ({"data_type": "timestamp", "timezone": False, "precision": 0}, SENT.replace(microsecond=0)),
+    (
+        {"data_type": "timestamp", "timezone": False, "precision": 1},
+        SENT.replace(microsecond=987000),
+    ),
+    (
+        {"data_type": "timestamp", "timezone": False, "precision": 3},
+        SENT.replace(microsecond=987000),
+    ),
+    ({"data_type": "timestamp", "timezone": False, "precision": 4}, SENT),
+    ({"data_type": "timestamp", "timezone": False}, SENT),
+    ({"data_type": "timestamp", "timezone": False, "precision": 9}, SENT),
+]
+
+
+@pytest.mark.parametrize(("column", "expected"), CUT, ids=[str(column) for column, _ in CUT])
+def test_a_timestamp_is_cut_to_its_columns_precision_before_an_insert(
+    column: dict[str, Any], expected: datetime.datetime
+) -> None:
+    sa_type = MAPPER.to_destination_type(column={"name": "c", **column}, table=None)  # type: ignore[arg-type,typeddict-item]
+    cut = getattr(sa_type, "process_bind_param", lambda value, dialect: value)
+    assert cut(SENT, DIALECT) == expected
+    assert cut(None, DIALECT) is None
+    zoned = SENT.replace(tzinfo=datetime.timezone.utc)
+    assert cut(zoned, DIALECT) == expected.replace(tzinfo=datetime.timezone.utc)
+
+
+@pytest.mark.parametrize(
+    ("precision", "expected"),
+    [(0, datetime.time(10, 20, 30)), (3, datetime.time(10, 20, 30, 987000)), (6, SENT.time())],
+)
+def test_a_time_is_cut_to_its_columns_precision_before_an_insert(
+    precision: int, expected: datetime.time
+) -> None:
+    column = {"name": "c", "data_type": "time", "precision": precision, "timezone": True}
+    sa_type = MAPPER.to_destination_type(column=column, table=None)  # type: ignore[arg-type]
+    cut = getattr(sa_type, "process_bind_param", lambda value, dialect: value)
+    assert cut(SENT.time(), DIALECT) == expected
 
 
 def test_an_unknown_data_type_is_refused() -> None:

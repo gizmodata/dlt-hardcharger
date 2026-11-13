@@ -104,7 +104,7 @@ jobs:
       - run: .venv/bin/python -m mypy dlt_hardcharger
 
   test:
-    name: Python ${{ matrix.python }}, SQLAlchemy ${{ matrix.sqlalchemy }}
+    name: Python ${{ matrix.python }}, SQLAlchemy ${{ matrix.sqlalchemy }}, zone ${{ matrix.zone }}
     needs: gate
     if: needs.gate.outputs.run == 'true'
     runs-on: ubuntu-24.04-arm
@@ -114,12 +114,32 @@ jobs:
       matrix:
         python: ["3.11", "3.12", "3.13", "3.14"]
         sqlalchemy: ["2.1"]
+        # "apart": the runner's zone (UTC) for the tests, and for the server the zone of its own
+        # that the tests give it (Pacific/Chatham). A named zone is for the tests AND the server.
+        zone: ["apart"]
         include:
+          # Stored values must not depend on a time zone: the whole suite again with client and
+          # server together in UTC, in New York, and in Kolkata (a half-hour offset).
+          - python: "3.14"
+            sqlalchemy: "2.1"
+            zone: "UTC"
+          - python: "3.14"
+            sqlalchemy: "2.1"
+            zone: "America/New_York"
+          - python: "3.14"
+            sqlalchemy: "2.1"
+            zone: "Asia/Kolkata"
           - python: "3.14"
             sqlalchemy: "2.0"
+            zone: "apart"
           # SQLAlchemy 2.1 needs Python 3.11, so Python 3.10 is SQLAlchemy 2.0 only.
           - python: "3.10"
             sqlalchemy: "2.0"
+            zone: "apart"
+    env:
+      # Empty for "apart": the runner stays in UTC and the tests pick the server's zone.
+      TZ: ${{ matrix.zone != 'apart' && matrix.zone || '' }}
+      DLT_HARDCHARGER_TEST_SERVER_TZ: ${{ matrix.zone != 'apart' && matrix.zone || '' }}
     steps:
       - uses: actions/checkout@v7
       - uses: astral-sh/setup-uv@v10.3.2
@@ -131,6 +151,21 @@ jobs:
           uv pip install -e ".[dev]" "sqlalchemy==${{ matrix.sqlalchemy }}.*"
           .venv/bin/python -c 'import sys, sqlalchemy, dlt; print(sys.version); print("SQLAlchemy", sqlalchemy.__version__, "dlt", dlt.__version__)'
           .venv/bin/python -c 'import sqlalchemy, sys; sys.exit(not sqlalchemy.__version__.startswith("${{ matrix.sqlalchemy }}."))'
+      - name: The tests run in the zone this job names
+        if: matrix.zone != 'apart'
+        env:
+          ZONE: ${{ matrix.zone }}
+        run: |
+          .venv/bin/python - <<'PY'
+          import datetime, os, sys, zoneinfo
+
+          zone = os.environ["ZONE"]
+          moment = datetime.datetime(2026, 7, 4, 12)
+          here = moment.astimezone().utcoffset()
+          there = moment.replace(tzinfo=zoneinfo.ZoneInfo(zone)).utcoffset()
+          print(f"TZ={os.environ.get('TZ')}: local offset {here}, {zone} is {there}")
+          sys.exit(0 if here == there else f"the process is not in {zone}")
+          PY
       # The server binary comes from GitHub's release downloads, which answer 5xx now and then
       # (a 504 failed a whole job on 2026-11-13). Fetch it once, with retries, before the tests:
       # they then start from the cache, and still fail if no server can be had.

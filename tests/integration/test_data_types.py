@@ -70,7 +70,7 @@ SERVER_TYPES = {
     "c_wei": "DECIMAL(38,0)",
     "c_date": "DATE",
     "c_time": "TIME",
-    "c_time_tz": "TIME WITH TIME ZONE",
+    "c_time_tz": "TIME",
 }
 
 # What dlt reads back from the table. The server keeps a hint only as far as its type does:
@@ -140,7 +140,7 @@ AS_TEXT = {
     "c_ts_p3": "2026-11-13 10:20:30.123",
     "c_ts_p9": "2026-11-13 10:20:30.123456",
     "c_time": "13:45:59.123456",
-    "c_time_tz": "13:45:59.123456-05",
+    "c_time_tz": "13:45:59.123456",
     "c_wei": str(2**120),
     "c_int128": str(-(2**63)),
     "c_decimal_38_18": "12345678901234567890.123456789012345678",
@@ -190,8 +190,7 @@ def test_every_data_type(pipeline: dlt.Pipeline, query: Query, file_format: str)
     sent, nulls = (dict(zip(names, row, strict=True)) for row in rows)
     assert nulls == NULLS
     sent["c_json"] = json.loads(sent["c_json"])
-    # TIME WITH TIME ZONE has no Arrow type: the driver hands over the time of day. The stored
-    # value keeps its offset, which AS_TEXT checks.
+    # A time of day is stored without a zone: the value's clock reading, its offset dropped.
     expected = {**ROW, "c_time_tz": ROW["c_time_tz"].replace(tzinfo=None)}
     assert sent == expected
 

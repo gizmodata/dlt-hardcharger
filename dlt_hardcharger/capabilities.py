@@ -52,6 +52,68 @@ TIMESTAMP_PRECISION = 6
 MAX_TIMESTAMP_PRECISION = 9
 
 
+def _unit_digits(precision: int) -> int:
+    """Fractional-second digits of the Arrow unit dlt's Parquet writer picks for a precision."""
+    if precision == 0:
+        return 0
+    if precision <= 3:
+        return 3
+    if precision <= 6:
+        return 6
+    return 9
+
+
+class _CutToPrecision:
+    """Cut a value's fractional seconds to its column's precision before it is sent.
+
+    dlt's Parquet writer stores a timestamp or time column in the Arrow unit of its precision
+    (seconds for 0, milliseconds up to 3) and drops the digits beyond it. An ``INSERT``
+    statement sends them all, and the server keeps them (TIMESTAMP WITH TIME ZONE and TIME are
+    always in microseconds) or rounds (TIMESTAMP_S, TIMESTAMP_MS): 10:20:30.987654 would be
+    10:20:30 from a Parquet file and 10:20:31 from an ``INSERT``. Cut here, both load paths
+    store what the Parquet path stores.
+    """
+
+    digits: int
+
+    def process_bind_param(self, value: Any, dialect: sa.engine.Dialect) -> Any:
+        if value is None or not hasattr(value, "microsecond"):
+            return value
+        step = 10 ** (6 - self.digits)
+        return value.replace(microsecond=value.microsecond // step * step)
+
+
+class _CutTimestamp(_CutToPrecision, sa.TypeDecorator[Any]):
+    impl = sa.DateTime
+    cache_ok = True
+
+    def __init__(self, kind: str, digits: int) -> None:
+        super().__init__(timezone=kind == "timestamptz")
+        self.kind = kind
+        self.digits = digits
+
+    def load_dialect_impl(self, dialect: sa.engine.Dialect) -> sa.types.TypeEngine[Any]:
+        # The type itself, not dialect.type_descriptor() of it: that would turn TIMESTAMP_S
+        # (a DateTime) into the dialect's plain TIMESTAMP in the table's DDL.
+        return _TIMESTAMP_KINDS[self.kind]()  # type: ignore[no-any-return]
+
+
+class _CutTime(_CutToPrecision, sa.TypeDecorator[Any]):
+    impl = sa.Time
+    cache_ok = True
+
+    def __init__(self, digits: int) -> None:
+        super().__init__(timezone=False)
+        self.digits = digits
+
+
+_TIMESTAMP_KINDS: dict[str, Any] = {
+    "timestamptz": lambda: sa.DateTime(timezone=True),
+    "timestamp_s": TIMESTAMP_S,
+    "timestamp_ms": TIMESTAMP_MS,
+}
+
+
 class HardchargerTypeMapper(SqlalchemyTypeMapper):
     """dlt's data types as DuckDB types, the way dlt's own DuckDB destination maps them."""
 
@@ -81,32 +143,45 @@ class HardchargerTypeMapper(SqlalchemyTypeMapper):
     ) -> sa.types.TypeEngine[Any]:
         # dlt's timestamps are time zone aware unless the column says timezone=False.
         timezone = column.get("timezone")
-        if timezone is None or timezone:
-            # TIMESTAMP WITH TIME ZONE has one precision: microseconds.
-            return sa.DateTime(timezone=True)
         precision = column.get("precision")
         if precision is None:
             precision = self.capabilities.timestamp_precision
-        if precision == 0:
-            return TIMESTAMP_S()
-        if precision <= 3:
-            return TIMESTAMP_MS()
-        if precision <= 6:
+        if precision > MAX_TIMESTAMP_PRECISION:
+            raise TerminalValueError(
+                f"timestamp with precision {precision} can't be mapped to a Hardcharger type"
+                " (TIMESTAMP_NS, 9 digits, is the finest)"
+            )
+        digits = _unit_digits(precision)
+        if timezone is None or timezone:
+            # TIMESTAMP WITH TIME ZONE has one precision: microseconds.
+            if digits < 6:
+                return _CutTimestamp(kind="timestamptz", digits=digits)
+            return sa.DateTime(timezone=True)
+        if digits == 0:
+            return _CutTimestamp(kind="timestamp_s", digits=0)
+        if digits == 3:
+            return _CutTimestamp(kind="timestamp_ms", digits=3)
+        if digits == 6:
             return sa.DateTime(timezone=False)
-        if precision <= MAX_TIMESTAMP_PRECISION:
-            return TIMESTAMP_NS()
-        raise TerminalValueError(
-            f"timestamp with precision {precision} can't be mapped to a Hardcharger type"
-            " (TIMESTAMP_NS, 9 digits, is the finest)"
-        )
+        return TIMESTAMP_NS()
 
     def db_type_from_time_type(
         self, column: TColumnSchema, table: PreparedTableSchema
     ) -> sa.types.TypeEngine[Any]:
-        # dlt's "time" is a time of day: TIME. The base mapper asks for TIME WITH TIME ZONE
-        # unless the column says timezone=False, and the server then attaches the session's
-        # offset to every value.
-        return sa.Time(timezone=bool(column.get("timezone", False)))
+        # Always TIME, whatever the column's `timezone` hint (which dlt defaults to true): a time
+        # of day has no zone here, as on dlt's own DuckDB destination. TIME WITH TIME ZONE can't
+        # be loaded reliably. Parquet and Arrow have no such type, so a value's offset is gone
+        # before the file reaches the server, and the server then attaches its session's offset
+        # to what arrives without one: the same pipeline would store 13:45-05 on one server and
+        # 13:45+00 on another. Into TIME, a value's clock reading is stored and its offset
+        # dropped, on both load paths and in every zone.
+        precision = column.get("precision")
+        if precision is None:
+            precision = self.capabilities.timestamp_precision
+        digits = _unit_digits(precision)
+        if digits < 6:
+            return _CutTime(digits=digits)
+        return sa.Time(timezone=False)
 
     def _from_db_integer_type(self, db_type: sa.Integer) -> TColumnSchema:
         # BIGINT first: SQLAlchemy's BigInteger is an Integer, which the base mapper reads as
@@ -127,6 +202,8 @@ class HardchargerTypeMapper(SqlalchemyTypeMapper):
         precision: int | None = None,
         scale: int | None = None,
     ) -> TColumnSchema:
+        if isinstance(db_type, sa.TypeDecorator):
+            db_type = db_type.load_dialect_impl(self.dialect)
         column = super().from_destination_type(db_type=db_type, precision=precision, scale=scale)
         for timestamp_type, digits in _TIMESTAMP_DIGITS.items():
             if isinstance(db_type, timestamp_type):

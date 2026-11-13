@@ -39,10 +39,22 @@ def pytest_runtest_makereport(item: pytest.Item, call: pytest.CallInfo[None]) ->
         report.longrepr = f"integration tests never skip, but this one did: {report.longrepr}"
 
 
+# The server's time zone is its sessions' time zone. Unless the environment names one, the tests'
+# server runs in a zone no developer machine or CI runner is in, with an offset that is not a
+# whole hour: a test that passes only when client and server share a zone fails everywhere.
+# CI also runs the suite with client and server together in UTC, New York and Kolkata.
+SERVER_ZONE = os.environ.get("DLT_HARDCHARGER_TEST_SERVER_TZ") or "Pacific/Chatham"
+
+
 @pytest.fixture(scope="session")
 def server() -> Iterator[hardcharger.Server]:
-    with hardcharger.Server(username=USERNAME, password=PASSWORD) as running:
+    with hardcharger.Server(
+        username=USERNAME, password=PASSWORD, env={"TZ": SERVER_ZONE}
+    ) as running:
         assert running.host == "127.0.0.1"
+        with running.connect() as connection, connection.cursor() as cursor:
+            cursor.execute("SELECT current_setting('TimeZone')")
+            assert cursor.fetchone() == (SERVER_ZONE,), "the server ignored its TZ"
         yield running
 
 

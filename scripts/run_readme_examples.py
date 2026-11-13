@@ -30,6 +30,9 @@ README = Path(__file__).resolve().parent.parent / "README.md"
 ADDRESS_IN_EXAMPLES = "localhost:31337"
 ADDRESS_IN_PARTS = 'host = "localhost"\nport = 31337'
 USERNAME, PASSWORD = "hardcharger", "change-me"
+# As in the tests: a server in a zone of its own unless the environment names one, so an example
+# whose output depends on the client and the server sharing a zone fails.
+SERVER_ZONE = os.environ.get("DLT_HARDCHARGER_TEST_SERVER_TZ") or "Pacific/Chatham"
 EXPECTED_RUN = 9
 EXPECTED_SETUP = 3
 EXPECTED_NOT_RUN = 0
@@ -67,7 +70,9 @@ def main() -> int:
     secrets: str | None = None
     exports: dict[str, str] = {}
 
-    with hardcharger.Server(username=USERNAME, password=PASSWORD) as server:
+    with hardcharger.Server(
+        username=USERNAME, password=PASSWORD, env={"TZ": SERVER_ZONE}
+    ) as server:
         address = f"{server.host}:{server.port}"
         for block in BLOCK.finditer(text):
             line = text.count("\n", 0, block.start("code")) + 1

@@ -310,15 +310,34 @@ with engine.connect() as conn:
 | `bigint` | `BIGINT`; with `precision` 8, 16, 32, 64 or 128 bits: `TINYINT`, `SMALLINT`, `INTEGER`, `BIGINT`, `HUGEINT` |
 | `decimal` | `DECIMAL(38,9)`, or the column's `precision` and `scale` |
 | `wei` | `DECIMAL(38,0)` |
-| `timestamp` | `TIMESTAMP WITH TIME ZONE` (microseconds) |
-| `timestamp` with `timezone=False` | `TIMESTAMP`; with `precision` 0, 3 or 9: `TIMESTAMP_S`, `TIMESTAMP_MS`, `TIMESTAMP_NS` |
+| `timestamp` | `TIMESTAMP WITH TIME ZONE` (microseconds): an instant. A value without an offset is read as UTC |
+| `timestamp` with `timezone=False` | `TIMESTAMP`; with `precision` 0, 3 or 9: `TIMESTAMP_S`, `TIMESTAMP_MS`, `TIMESTAMP_NS`. A value with an offset is stored as its UTC clock reading |
 | `date` | `DATE` |
-| `time` | `TIME`; with `timezone=True`: `TIME WITH TIME ZONE` |
+| `time` | `TIME`, whatever the `timezone` hint: a value's clock reading is stored and its UTC offset dropped (`13:45-05:00` is `13:45`) |
 | `binary` | `BLOB` |
 | `json` | `JSON` |
 
 Each is tested both ways (Arrow ingest and `INSERT` statements): the value read back is the value
-sent.
+sent, and both ways store the same value.
+
+**Nothing stored depends on a time zone**, the client's or the server's. A Hardcharger session
+works in the server's time zone, and DuckDB gives a value that arrives without an offset that
+zone's offset wherever a zoned type is expected. The destination never lets that happen:
+
+- A `timestamp` is always sent as an instant, so it is the same instant on every server. Read it
+  back and you get that instant; as text (`::VARCHAR`), DuckDB prints it in the session's zone.
+- A `time` is never `TIME WITH TIME ZONE`. Parquet and Arrow have no time-of-day type with an
+  offset, so the offset of a value is gone before a file reaches the server, and the server would
+  attach its own: the same pipeline would store `13:45-05` on one server and `13:45+00` on
+  another. dlt's `timezone` hint therefore has no effect on a `time` column, as on dlt's own
+  DuckDB destination. If the offset matters, store an instant (`timestamp`) or keep the offset in
+  a column of its own.
+- Fractional seconds beyond a column's `precision` are cut, never rounded, by both load paths:
+  `10:20:30.987654` in a `precision=0` column is `10:20:30`.
+
+The test suite loads every kind of timestamp, time and date from clients and into servers in UTC,
+New York and Kolkata (a half-hour offset), in the same zone and in different ones, over both load
+paths, and requires the same stored values every time.
 
 ## Reading the data
 
