@@ -26,6 +26,12 @@ from sqlalchemy_hardcharger import HUGEINT, TIMESTAMP_MS, TIMESTAMP_NS, TIMESTAM
 DIALECT_NAME = "hardcharger"
 SQLGLOT_DIALECT = "duckdb"
 
+# The merge strategies dlt's SQLAlchemy destination runs on any dialect.
+SQLALCHEMY_MERGE_STRATEGIES = ("delete-insert", "scd2")
+# Those, and the ones built on DuckDB 2.0's MERGE INTO, which the hardcharger destination adds.
+MERGE_STRATEGIES = ("delete-insert", "upsert", "scd2", "insert-only", "cdc")
+REPLACE_STRATEGIES = ("truncate-and-insert", "insert-from-staging", "staging-optimized")
+
 # Microseconds: what TIMESTAMP and TIMESTAMP WITH TIME ZONE keep.
 TIMESTAMP_PRECISION = 6
 # Nanoseconds: TIMESTAMP_NS, for a timestamp column without a time zone.
@@ -101,6 +107,9 @@ class HardchargerDialectCapabilities(DialectCapabilities):
     def adjust_capabilities(
         self, caps: DestinationCapabilitiesContext, dialect: sa.engine.interfaces.Dialect
     ) -> None:
+        # Merge strategies stay as the destination set them: a plain dlt.destinations.sqlalchemy
+        # runs dlt's SQLAlchemy merge job (delete-insert, scd2); the hardcharger destination
+        # has its own job client and lists MERGE_STRATEGIES (dlt_hardcharger.destinations).
         apply_hardcharger_capabilities(caps=caps)
 
     def type_mapper_class(self) -> type[DataTypeMapper]:
@@ -123,6 +132,10 @@ def apply_hardcharger_capabilities(caps: DestinationCapabilitiesContext) -> None
     caps.has_case_sensitive_identifiers = False
     caps.timestamp_precision = TIMESTAMP_PRECISION
     caps.max_timestamp_precision = MAX_TIMESTAMP_PRECISION
+    # staging-optimized has no faster form here (no table clone or swap): dlt's SQLAlchemy
+    # client runs it as insert-from-staging, which is the fallback dlt documents. Listing it
+    # means a pipeline configured for it loads, where an unlisted strategy is an AssertionError.
+    caps.supported_replace_strategies = list(REPLACE_STRATEGIES)
 
 
 def register() -> None:

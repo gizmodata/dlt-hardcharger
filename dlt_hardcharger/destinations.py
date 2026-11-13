@@ -12,7 +12,11 @@ from typing import TYPE_CHECKING, Any
 from dlt.common.destination import Destination, DestinationCapabilitiesContext
 from dlt.destinations.impl.sqlalchemy.factory import sqlalchemy as _sqlalchemy
 
-from .capabilities import HardchargerTypeMapper, apply_hardcharger_capabilities
+from .capabilities import (
+    MERGE_STRATEGIES,
+    HardchargerTypeMapper,
+    apply_hardcharger_capabilities,
+)
 from .configuration import HardchargerClientConfiguration, HardchargerCredentials
 
 if TYPE_CHECKING:
@@ -29,7 +33,12 @@ class hardcharger(_sqlalchemy):  # noqa: N801 (dlt names destination factories i
     def _raw_capabilities(self) -> DestinationCapabilitiesContext:
         caps = super()._raw_capabilities()
         apply_hardcharger_capabilities(caps=caps)
+        # With HardchargerJobClient, which runs the MERGE INTO strategies as well.
+        caps.supported_merge_strategies = list(MERGE_STRATEGIES)  # type: ignore[arg-type]
         caps.type_mapper = HardchargerTypeMapper
+        # Parquet files are bulk-loaded as Arrow (HardchargerArrowIngestJob); typed-jsonl files
+        # are sent as INSERT statements, about seventy times slower.
+        caps.preferred_loader_file_format = "parquet"
         return caps
 
     @property

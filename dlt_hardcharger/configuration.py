@@ -46,6 +46,14 @@ class HardchargerCredentials(SqlalchemyCredentials):
                 f"The hardcharger destination takes a hardcharger:// URL, not `{backend}://`."
                 " Use dlt.destinations.sqlalchemy for other databases."
             )
+        if not self.host and "profile" not in (self.query or {}):
+            raise ConfigurationValueError(
+                "The hardcharger destination has no server to connect to. Give it a"
+                " hardcharger://user:password@host[:port][/catalog] URL: as"
+                " credentials=... to dlt_hardcharger.hardcharger(), in the environment variable"
+                " DESTINATION__HARDCHARGER__CREDENTIALS, or as credentials under"
+                " [destination.hardcharger] in .dlt/secrets.toml."
+            )
 
 
 @configspec
