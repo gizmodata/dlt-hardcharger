@@ -42,7 +42,10 @@ def test_load_into_an_attached_catalog(
     pipeline.run(visits([{"id": 2, "pages": [{"p": "b"}]}, {"id": 3, "pages": []}]))
 
     # Everything is in the catalog of the URL: the tables, dlt's own, and the staging dataset.
-    assert _where(query=query, table="visits", dataset=dataset) == [(lake, dataset), (lake, f"{dataset}_staging")]
+    assert _where(query=query, table="visits", dataset=dataset) == [
+        (lake, dataset),
+        (lake, f"{dataset}_staging"),
+    ]
     assert _where(query=query, table="_dlt_pipeline_state", dataset=dataset) == [(lake, dataset)]
     assert query(f"SELECT id FROM {lake}.{dataset}.visits ORDER BY id") == [(1,), (2,), (3,)]
     assert query(f"SELECT p FROM {lake}.{dataset}.visits__pages ORDER BY p") == [("a",), ("b",)]

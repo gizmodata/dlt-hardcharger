@@ -32,7 +32,7 @@ class HardchargerCredentials(SqlalchemyCredentials):
     def get_dialect_class(self) -> type[Dialect]:
         # Known without an engine: dlt asks for capabilities before it has credentials, and an
         # engine can't be made from a URL that has no host yet.
-        if self.is_external_engine:
+        if self.is_external_engine and self.engine is not None:
             return type(self.engine.dialect)
         from sqlalchemy_hardcharger import HardchargerDialect
 
@@ -61,7 +61,7 @@ class HardchargerClientConfiguration(SqlalchemyClientConfiguration):
     destination_type: Final[str] = dataclasses.field(  # type: ignore[misc]
         default=DIALECT_NAME, init=False, repr=False, compare=False
     )
-    credentials: HardchargerCredentials = None
+    credentials: HardchargerCredentials = None  # type: ignore[assignment]
 
     def get_dialect_class(self) -> type[Dialect]:
         # dlt asks for capabilities before the credentials are resolved (they may still be the

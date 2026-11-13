@@ -158,9 +158,7 @@ def test_drop_the_whole_dataset(loaded: dlt.Pipeline, query: Query) -> None:
     dataset = loaded.dataset_name
     with loaded.sql_client() as client:
         client.drop_dataset()
-    assert query(
-        f"SELECT count(*) FROM duckdb_schemas() WHERE schema_name = '{dataset}'"
-    ) == [(0,)]
+    assert query(f"SELECT count(*) FROM duckdb_schemas() WHERE schema_name = '{dataset}'") == [(0,)]
     # And the pipeline can load into it again.
     loaded.run(shop(), refresh="drop_sources")
     assert query(f"SELECT count(*) FROM {dataset}.orders") == [(3,)]

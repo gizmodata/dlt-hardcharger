@@ -19,7 +19,9 @@ LOAD_AND_REPORT = """
     import dlt
 
     assert "dlt_hardcharger" not in sys.modules, "the test must not import the package itself"
-    pipeline = dlt.pipeline(pipeline_name="{name}", destination="{destination}", dataset_name="{name}")
+    pipeline = dlt.pipeline(
+        pipeline_name="{name}", destination="{destination}", dataset_name="{name}"
+    )
     info = pipeline.run([{{"id": 1}}, {{"id": 2}}], table_name="numbers")
     assert not info.has_failed_jobs
     with pipeline.destination_client() as client:
@@ -166,9 +168,7 @@ def test_another_database_url_is_refused(make_pipeline: MakePipeline) -> None:
     assert "takes a hardcharger:// URL, not `postgresql://`" in str(cause)
 
 
-def test_wrong_password_is_an_authentication_error(
-    url: str, make_pipeline: MakePipeline
-) -> None:
+def test_wrong_password_is_an_authentication_error(url: str, make_pipeline: MakePipeline) -> None:
     pipeline = make_pipeline(credentials=url.replace(PASSWORD, "not-the-password"))
     with pytest.raises(PipelineStepFailed) as raised:
         pipeline.run([{"id": 1}], table_name="numbers")

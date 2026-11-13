@@ -15,7 +15,11 @@ import sqlalchemy as sa
 from dlt.common.destination.capabilities import DataTypeMapper, DestinationCapabilitiesContext
 from dlt.common.destination.typing import PreparedTableSchema
 from dlt.common.exceptions import TerminalValueError
-from dlt.common.schema.typing import TColumnSchema
+from dlt.common.schema.typing import (
+    TColumnSchema,
+    TLoaderMergeStrategy,
+    TLoaderReplaceStrategy,
+)
 from dlt.destinations.impl.sqlalchemy.dialect import (
     DialectCapabilities,
     register_dialect_capabilities,
@@ -27,10 +31,20 @@ DIALECT_NAME = "hardcharger"
 SQLGLOT_DIALECT = "duckdb"
 
 # The merge strategies dlt's SQLAlchemy destination runs on any dialect.
-SQLALCHEMY_MERGE_STRATEGIES = ("delete-insert", "scd2")
+SQLALCHEMY_MERGE_STRATEGIES: tuple[TLoaderMergeStrategy, ...] = ("delete-insert", "scd2")
 # Those, and the ones built on DuckDB 2.0's MERGE INTO, which the hardcharger destination adds.
-MERGE_STRATEGIES = ("delete-insert", "upsert", "scd2", "insert-only", "cdc")
-REPLACE_STRATEGIES = ("truncate-and-insert", "insert-from-staging", "staging-optimized")
+MERGE_STRATEGIES: tuple[TLoaderMergeStrategy, ...] = (
+    "delete-insert",
+    "upsert",
+    "scd2",
+    "insert-only",
+    "cdc",
+)
+REPLACE_STRATEGIES: tuple[TLoaderReplaceStrategy, ...] = (
+    "truncate-and-insert",
+    "insert-from-staging",
+    "staging-optimized",
+)
 
 # Microseconds: what TIMESTAMP and TIMESTAMP WITH TIME ZONE keep.
 TIMESTAMP_PRECISION = 6
@@ -93,6 +107,34 @@ class HardchargerTypeMapper(SqlalchemyTypeMapper):
         # unless the column says timezone=False, and the server then attaches the session's
         # offset to every value.
         return sa.Time(timezone=bool(column.get("timezone", False)))
+
+    def _from_db_integer_type(self, db_type: sa.Integer) -> TColumnSchema:
+        # BIGINT first: SQLAlchemy's BigInteger is an Integer, which the base mapper reads as
+        # 32 bits.
+        if isinstance(db_type, HUGEINT):
+            return {"data_type": "bigint", "precision": 128}
+        if isinstance(db_type, sa.BigInteger):
+            return {"data_type": "bigint"}
+        if isinstance(db_type, TINYINT):
+            return {"data_type": "bigint", "precision": 8}
+        if isinstance(db_type, sa.SmallInteger):
+            return {"data_type": "bigint", "precision": 16}
+        return {"data_type": "bigint", "precision": 32}
+
+    def from_destination_type(  # type: ignore[override]
+        self,
+        db_type: sa.types.TypeEngine[Any],
+        precision: int | None = None,
+        scale: int | None = None,
+    ) -> TColumnSchema:
+        column = super().from_destination_type(db_type=db_type, precision=precision, scale=scale)
+        for timestamp_type, digits in _TIMESTAMP_DIGITS.items():
+            if isinstance(db_type, timestamp_type):
+                column["precision"] = digits
+        return column
+
+
+_TIMESTAMP_DIGITS: dict[type, int] = {TIMESTAMP_S: 0, TIMESTAMP_MS: 3, TIMESTAMP_NS: 9}
 
 
 class HardchargerDialectCapabilities(DialectCapabilities):

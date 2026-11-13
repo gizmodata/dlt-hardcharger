@@ -73,6 +73,35 @@ SERVER_TYPES = {
     "c_time_tz": "TIME WITH TIME ZONE",
 }
 
+# What dlt reads back from the table. The server keeps a hint only as far as its type does:
+# VARCHAR(10) is VARCHAR, a zoned timestamp is always in microseconds.
+REFLECTED: dict[str, Any] = {
+    "c_text": {"data_type": "text"},
+    "c_text_10": {"data_type": "text"},
+    "c_double": {"data_type": "double"},
+    "c_bool": {"data_type": "bool"},
+    "c_ts": {"data_type": "timestamp", "timezone": True},
+    "c_ts_tz_p3": {"data_type": "timestamp", "timezone": True},
+    "c_ts_ntz": {"data_type": "timestamp", "timezone": False},
+    "c_ts_p0": {"data_type": "timestamp", "timezone": False, "precision": 0},
+    "c_ts_p3": {"data_type": "timestamp", "timezone": False, "precision": 3},
+    "c_ts_p9": {"data_type": "timestamp", "timezone": False, "precision": 9},
+    "c_bigint": {"data_type": "bigint"},
+    "c_int8": {"data_type": "bigint", "precision": 8},
+    "c_int16": {"data_type": "bigint", "precision": 16},
+    "c_int32": {"data_type": "bigint", "precision": 32},
+    "c_int128": {"data_type": "bigint", "precision": 128},
+    "c_binary": {"data_type": "binary"},
+    "c_json": {"data_type": "json"},
+    "c_decimal": {"data_type": "decimal", "precision": 38, "scale": 9},
+    "c_decimal_38_18": {"data_type": "decimal", "precision": 38, "scale": 18},
+    "c_decimal_10_2": {"data_type": "decimal", "precision": 10, "scale": 2},
+    "c_wei": {"data_type": "wei"},
+    "c_date": {"data_type": "date"},
+    "c_time": {"data_type": "time"},
+    "c_time_tz": {"data_type": "time"},
+}
+
 ROW: dict[str, Any] = {
     "id": 1,
     "c_text": "héllo \n 'quoted' \"double\" 🚀",
@@ -140,6 +169,19 @@ def test_every_data_type(pipeline: dlt.Pipeline, query: Query, file_format: str)
     assert {column: stored[column] for column in SERVER_TYPES} == SERVER_TYPES
     # No value needed a variant column: every one fitted the type its column was given.
     assert set(stored) == {"id", *COLUMNS, "_dlt_load_id", "_dlt_id"}
+
+    # Read back from the server's catalog, each column is the dlt type it was declared as.
+    with pipeline.destination_client() as job_client:
+        ((_, reflected),) = job_client.get_storage_tables(table_names=["types"])  # type: ignore[attr-defined]
+    hints = {
+        column: {
+            key: value
+            for key, value in reflected[column].items()
+            if key not in ("name", "nullable") and value is not None
+        }
+        for column in COLUMNS
+    }
+    assert hints == REFLECTED
 
     with pipeline.sql_client() as client:
         table = client.make_qualified_table_name("types")
@@ -253,9 +295,7 @@ def test_arrow_table_input(pipeline: dlt.Pipeline, query: Query, file_format: st
     assert rows[1] == (2, *([None] * 15))
 
 
-def test_a_value_out_of_range_fails_the_job_for_good(
-    pipeline: dlt.Pipeline, query: Query
-) -> None:
+def test_a_value_out_of_range_fails_the_job_for_good(pipeline: dlt.Pipeline, query: Query) -> None:
     """Arrow ingest reports the server's conversion error as terminal: no five retries."""
     table = pa.table({"id": pa.array([1, 2]), "u64": pa.array([5, 2**63 + 5], type=pa.uint64())})
     with pytest.raises(PipelineStepFailed) as raised:

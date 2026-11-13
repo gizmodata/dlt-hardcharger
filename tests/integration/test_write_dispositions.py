@@ -18,7 +18,11 @@ FORMATS = ["parquet", "typed-jsonl"]
 
 def _orders(first: int, last: int) -> list[dict[str, Any]]:
     return [
-        {"id": i, "status": "new", "lines": [{"sku": f"s{i}", "qty": 1}, {"sku": f"t{i}", "qty": 2}]}
+        {
+            "id": i,
+            "status": "new",
+            "lines": [{"sku": f"s{i}", "qty": 1}, {"sku": f"t{i}", "qty": 2}],
+        }
         for i in range(first, last + 1)
     ]
 
@@ -246,9 +250,10 @@ def test_merge_into_tables_with_primary_key_and_unique_constraints(
     second = [{"id": 2, "code": "b", "v": "B"}, {"id": 3, "code": "c", "v": "c"}]
     for rows in (first, second, second):
         assert not pipeline.run(items(rows)).has_failed_jobs
-    assert query(f"SELECT id, v FROM {dataset}.items ORDER BY id") == EXPECTED_AFTER_SECOND[
-        strategy
-    ][0]
+    assert (
+        query(f"SELECT id, v FROM {dataset}.items ORDER BY id")
+        == EXPECTED_AFTER_SECOND[strategy][0]
+    )
     constraints = query(
         "SELECT constraint_type, constraint_column_names FROM duckdb_constraints()"
         f" WHERE schema_name = '{dataset}' AND table_name = 'items'"

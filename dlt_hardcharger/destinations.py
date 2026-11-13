@@ -34,7 +34,7 @@ class hardcharger(_sqlalchemy):  # noqa: N801 (dlt names destination factories i
         caps = super()._raw_capabilities()
         apply_hardcharger_capabilities(caps=caps)
         # With HardchargerJobClient, which runs the MERGE INTO strategies as well.
-        caps.supported_merge_strategies = list(MERGE_STRATEGIES)  # type: ignore[arg-type]
+        caps.supported_merge_strategies = list(MERGE_STRATEGIES)
         caps.type_mapper = HardchargerTypeMapper
         # Parquet files are bulk-loaded as Arrow (HardchargerArrowIngestJob); typed-jsonl files
         # are sent as INSERT statements, about seventy times slower.

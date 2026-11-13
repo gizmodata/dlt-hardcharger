@@ -33,3 +33,30 @@ include = ["dlt_hardcharger*"]
 
 [tool.setuptools.package-data]
 dlt_hardcharger = ["py.typed"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests/unit", "tests/integration"]
+addopts = "-ra"
+filterwarnings = [
+    "error",
+    # dlt's own SQLAlchemy merge job (merge_job.py) passes subqueries where SQLAlchemy wants
+    # them wrapped; the statements it builds are the tested ones.
+    "ignore:implicitly coercing SELECT object to scalar subquery:sqlalchemy.exc.SAWarning",
+    "ignore:Coercing Subquery object into a select:sqlalchemy.exc.SAWarning",
+]
+
+[tool.mypy]
+python_version = "3.10"
+warn_unused_configs = true
+ignore_missing_imports = true
+
+[tool.ruff]
+line-length = 100
+target-version = "py310"
+
+[tool.ruff.lint]
+select = ["E", "F", "I", "W", "B", "UP", "N"]
+
+[tool.ruff.lint.per-file-ignores]
+# dlt's incremental cursor is declared as an argument default: `since=dlt.sources.incremental("id")`.
+"tests/*" = ["B008"]

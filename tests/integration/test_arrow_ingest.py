@@ -28,7 +28,9 @@ def _job_classes(pipeline: dlt.Pipeline, monkeypatch: pytest.MonkeyPatch) -> dic
     made: dict[str, str] = {}
     original = HardchargerJobClient.create_load_job
 
-    def recording(self: Any, table: Any, file_path: str, load_id: str, restore: bool = False) -> Any:
+    def recording(
+        self: Any, table: Any, file_path: str, load_id: str, restore: bool = False
+    ) -> Any:
         job = original(self, table, file_path, load_id, restore)
         made[table["name"]] = type(job).__name__
         return job

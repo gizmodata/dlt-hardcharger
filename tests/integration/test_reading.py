@@ -1,4 +1,4 @@
-"""Reading what was loaded: pipeline.dataset(), the SQL client, and state kept at the destination."""
+"""Reading what was loaded: pipeline.dataset(), the SQL client, state kept at the destination."""
 
 from __future__ import annotations
 
