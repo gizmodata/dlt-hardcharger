@@ -199,27 +199,7 @@ jobs:
         run: |
           uv venv --python 3.10
           uv pip install --resolution lowest-direct -e ".[dev]"
-          .venv/bin/python - <<'PY'
-          import re, sys
-          from importlib.metadata import requires, version
-
-          floor = re.search(r'^requires-python = ">=([0-9.]+)"', open("pyproject.toml").read(), re.M).group(1)
-          running = "%d.%d" % sys.version_info[:2]
-          print(f"python: floor {floor}, running {running}")
-          if running != floor:
-              sys.exit(f"requires-python's floor is {floor}, but this job runs Python {running}")
-          wrong = []
-          # The package's own requirements, without the extras' (tomllib is Python 3.11's).
-          for requirement in [r for r in requires("dlt-hardcharger") if "extra ==" not in r]:
-              # Built metadata orders the specifiers its own way ("dlt[parquet,sqlalchemy]<2,>=1.32.0").
-              name = re.match(r"[A-Za-z0-9_.-]+", requirement).group(0)
-              floor = re.search(r">=([0-9.]+)", requirement).group(1)
-              installed = version(name)
-              print(f"{name}: floor {floor}, installed {installed}")
-              if installed != floor:
-                  wrong.append(name)
-          sys.exit(f"not at their floors: {wrong}" if wrong else 0)
-          PY
+          .venv/bin/python scripts/check_floors.py
       # The server binary comes from GitHub's release downloads, which answer 5xx now and then
       # (a 504 failed a whole job on 2026-11-13). Fetch it once, with retries, before the tests:
       # they then start from the cache, and still fail if no server can be had.
