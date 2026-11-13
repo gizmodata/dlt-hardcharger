@@ -9,10 +9,34 @@ description = "dlt destination for Hardcharger, GizmoData's DuckDB 2.0 server"
 readme = "README.md"
 license = "Apache-2.0"
 license-files = ["LICENSE", "NOTICE"]
+# dlt's own range: dlt 1.32.0 declares >=3.10,<3.15.
 requires-python = ">=3.10,<3.15"
 authors = [{ name = "Philip Moore", email = "philip@gizmodata.com" }]
+keywords = ["dlt", "data load tool", "destination", "hardcharger", "duckdb", "adbc", "arrow", "chargewire", "etl", "elt"]
+classifiers = [
+    "Development Status :: 5 - Production/Stable",
+    "Intended Audience :: Developers",
+    "Operating System :: OS Independent",
+    "Programming Language :: Python :: 3",
+    "Programming Language :: Python :: 3.10",
+    "Programming Language :: Python :: 3.11",
+    "Programming Language :: Python :: 3.12",
+    "Programming Language :: Python :: 3.13",
+    "Programming Language :: Python :: 3.14",
+    "Topic :: Database",
+    "Topic :: Software Development :: Libraries",
+    "Typing :: Typed",
+]
+
+# Floors are the latest releases when this package was created (2026-11-13). CI's
+# lowest-versions job installs exactly these, so they stay true.
 dependencies = [
-    "dlt[sqlalchemy]>=1.32.0,<2",
+    # The destination subclasses dlt's SQLAlchemy destination (factory, configuration, job
+    # client), whose dialect-capabilities hook and Hardcharger-relevant behavior are as of
+    # 1.32.0. `parquet` is dlt's extra for the Parquet files this destination loads by default.
+    "dlt[sqlalchemy,parquet]>=1.32.0,<2",
+    # The hardcharger:// dialect; brings SQLAlchemy 2.0/2.1 and adbc-driver-hardcharger, whose
+    # Arrow bulk ingest loads the files (and with it adbc-driver-manager and pyarrow).
     "sqlalchemy-hardcharger>=1.1.0,<2",
 ]
 
@@ -20,10 +44,28 @@ dependencies = [
 dev = [
     "hardcharger>=2.12.0",
     "pytest>=9.2.0",
+    # dlt's relations hand out data frames (`.df()`); one test reads one.
+    "pandas>=3.1.1; python_version >= '3.11'",
+    # pandas 3 needs Python 3.11; this is the last 2.x release.
+    "pandas>=2.3.3; python_version < '3.11'",
+    "ruff>=0.17.5",
+    "mypy>=2.4.1",
+    "build>=1.6.1",
+    "twine>=7.0.0",
 ]
 
+# dlt loads every `dlt` entry point when it builds its plugin manager and looks for a destination
+# named in a pipeline in `<entry point's top-level module>.destinations`: this is what makes
+# destination="hardcharger" work with no import.
 [project.entry-points.dlt]
 dlt_hardcharger = "dlt_hardcharger"
+
+[project.urls]
+Homepage = "https://gizmodata.com/hardcharger"
+Repository = "https://github.com/gizmodata/dlt-hardcharger"
+Documentation = "https://github.com/gizmodata/dlt-hardcharger#readme"
+Changelog = "https://github.com/gizmodata/dlt-hardcharger/blob/main/CHANGELOG.md"
+Issues = "https://github.com/gizmodata/dlt-hardcharger/issues"
 
 [tool.setuptools.dynamic]
 version = { attr = "dlt_hardcharger._version.__version__" }

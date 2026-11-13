@@ -284,3 +284,19 @@ def test_a_duplicate_key_in_a_primary_key_table_fails_the_job_for_good(
     # nothing of the file was kept.
     assert type(raised.value.__cause__).__name__ == "LoadClientJobTerminalRetry"
     assert query(f"SELECT id FROM {dataset}.items") == [(1,)]
+
+
+def test_scd2_keeps_versions_that_a_primary_key_on_the_natural_key_forbids(
+    make_pipeline: MakePipeline, query: Query
+) -> None:
+    """scd2 stores several rows per key: with create_primary_keys the second version is refused."""
+    pipeline = make_pipeline(create_primary_keys=True)
+    items = _merge_resource(strategy="scd2", primary_key="id")
+    pipeline.run(items([{"id": 1, "v": "a"}]))
+    with pytest.raises(PipelineStepFailed) as raised:
+        pipeline.run(items([{"id": 1, "v": "A"}]))
+    assert 'Duplicate key "id: 1" violates primary key constraint' in str(raised.value)
+    # The merge is one transaction: the first version is still the current one.
+    assert query(
+        f"SELECT v, _dlt_valid_to IS NULL FROM {pipeline.dataset_name}.items"
+    ) == [("a", True)]

@@ -1,0 +1,339 @@
+name: CI
+
+# Every check, on every push to main and every pull request, and the release gate: a v* tag runs
+# all of it on the tagged commit and publishes only if every job passed.
+#
+#   - lint: ruff check, ruff format --check, mypy;
+#   - test: on Python 3.10 to 3.14 (dlt's range), the unit tests, the integration tests and every
+#     README example, against a real hardcharger-server (the `hardcharger` package downloads the
+#     released binary and runs it on a free port). With the newest dlt and SQLAlchemy on each
+#     Python, and with the SQLAlchemy 2.0 series on the newest Python;
+#   - lowest: the same, with exactly the lowest dependency versions pyproject.toml allows;
+#   - build: the sdist and wheel, their metadata, and the wheel installed into a clean
+#     environment where dlt must find the destination by name; on a tag, that the tag is the
+#     package's version and CHANGELOG.md has its section;
+#   - publish-pypi and release: tags only, after everything above.
+#
+# The live suites need a server: they FAIL when it can't start. Nothing skips for that.
+
+on:
+  push:
+    branches: [main]
+    tags: ["v*"]
+    # Documentation that nothing tests or packages into behaviour. README.md is NOT here: its
+    # examples are run by the test job. (Path filters don't apply to tags: a tag runs everything.)
+    paths-ignore:
+      - "CHANGELOG.md"
+      - "docs/**"
+      - "LICENSE"
+      - "NOTICE"
+  # Every pull request runs, documentation-only ones too: "CI result" is the check to require in
+  # branch protection, and a required check that never reports would block the merge.
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: ${{ !startsWith(github.ref, 'refs/tags/') }}
+
+env:
+  # The released server binary is downloaded from GitHub: authenticate so the download isn't
+  # rate limited.
+  HARDCHARGER_INSTALL_TOKEN: ${{ github.token }}
+  UV_VERSION_PIN: "0.13.5"
+  # dlt reports anonymous usage unless told not to: never from CI.
+  RUNTIME__DLTHUB_TELEMETRY: "false"
+
+jobs:
+  # A push to main of a commit this workflow already passed on (a fast-forward merge of a tested
+  # branch) doesn't test it again. Tags, pull requests and manual runs always test.
+  gate:
+    name: Already tested?
+    runs-on: ubuntu-24.04-arm
+    permissions:
+      actions: read
+      contents: read
+    outputs:
+      run: ${{ steps.decide.outputs.run }}
+    steps:
+      - id: decide
+        env:
+          GH_TOKEN: ${{ github.token }}
+          EVENT: ${{ github.event_name }}
+          REF: ${{ github.ref }}
+          SHA: ${{ github.sha }}
+          REPO: ${{ github.repository }}
+        run: |
+          set -euo pipefail
+          run=true
+          reason="a $EVENT run on $REF"
+          if [ "$EVENT" = push ] && [ "$REF" = refs/heads/main ]; then
+            passed=$(gh api "repos/$REPO/actions/workflows/ci.yml/runs?head_sha=$SHA&status=success" --jq '.total_count')
+            if [ "$passed" -gt 0 ]; then
+              run=false
+              reason="commit $SHA already passed this workflow $passed time(s)"
+            fi
+          fi
+          echo "run=$run ($reason)"
+          echo "run=$run" >> "$GITHUB_OUTPUT"
+          echo "**Tests:** run=\`$run\` ($reason)" >> "$GITHUB_STEP_SUMMARY"
+
+  lint:
+    name: ruff and mypy
+    needs: gate
+    if: needs.gate.outputs.run == 'true'
+    runs-on: ubuntu-24.04-arm
+    steps:
+      - uses: actions/checkout@v7
+      - uses: astral-sh/setup-uv@v10.3.2
+        with:
+          version: ${{ env.UV_VERSION_PIN }}
+      - name: Install
+        run: |
+          uv venv --python 3.14
+          uv pip install -e ".[dev]"
+      - run: .venv/bin/python -m ruff check .
+      - run: .venv/bin/python -m ruff format --check .
+      - run: .venv/bin/python -m mypy dlt_hardcharger
+
+  test:
+    name: Python ${{ matrix.python }}, SQLAlchemy ${{ matrix.sqlalchemy }}
+    needs: gate
+    if: needs.gate.outputs.run == 'true'
+    runs-on: ubuntu-24.04-arm
+    timeout-minutes: 20
+    strategy:
+      fail-fast: false
+      matrix:
+        python: ["3.11", "3.12", "3.13", "3.14"]
+        sqlalchemy: ["2.1"]
+        include:
+          - python: "3.14"
+            sqlalchemy: "2.0"
+          # SQLAlchemy 2.1 needs Python 3.11, so Python 3.10 is SQLAlchemy 2.0 only.
+          - python: "3.10"
+            sqlalchemy: "2.0"
+    steps:
+      - uses: actions/checkout@v7
+      - uses: astral-sh/setup-uv@v10.3.2
+        with:
+          version: ${{ env.UV_VERSION_PIN }}
+      - name: Install with SQLAlchemy ${{ matrix.sqlalchemy }}
+        run: |
+          uv venv --python ${{ matrix.python }}
+          uv pip install -e ".[dev]" "sqlalchemy==${{ matrix.sqlalchemy }}.*"
+          .venv/bin/python -c 'import sys, sqlalchemy, dlt; print(sys.version); print("SQLAlchemy", sqlalchemy.__version__, "dlt", dlt.__version__)'
+          .venv/bin/python -c 'import sqlalchemy, sys; sys.exit(not sqlalchemy.__version__.startswith("${{ matrix.sqlalchemy }}."))'
+      # The server binary comes from GitHub's release downloads, which answer 5xx now and then
+      # (a 504 failed a whole job on 2026-11-13). Fetch it once, with retries, before the tests:
+      # they then start from the cache, and still fail if no server can be had.
+      - name: Download the Hardcharger server
+        run: |
+          for attempt in 1 2 3 4 5; do
+            if .venv/bin/python -m hardcharger download; then exit 0; fi
+            echo "download failed (attempt $attempt of 5)"
+            sleep $((attempt * 15))
+          done
+          exit 1
+      - name: Unit tests
+        run: .venv/bin/python -m pytest tests/unit
+      - name: Integration tests (a real Hardcharger server)
+        run: .venv/bin/python -m pytest tests/integration
+      - name: README examples (a real Hardcharger server)
+        run: .venv/bin/python scripts/run_readme_examples.py
+
+  lowest:
+    name: Lowest dependency versions
+    needs: gate
+    if: needs.gate.outputs.run == 'true'
+    runs-on: ubuntu-24.04-arm
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v7
+      - uses: astral-sh/setup-uv@v10.3.2
+        with:
+          version: ${{ env.UV_VERSION_PIN }}
+      - name: Install exactly the floors in pyproject.toml
+        run: |
+          uv venv --python 3.10
+          uv pip install --resolution lowest-direct -e ".[dev]"
+          .venv/bin/python - <<'PY'
+          import re, sys
+          from importlib.metadata import requires, version
+
+          floor = re.search(r'^requires-python = ">=([0-9.]+)"', open("pyproject.toml").read(), re.M).group(1)
+          running = "%d.%d" % sys.version_info[:2]
+          print(f"python: floor {floor}, running {running}")
+          if running != floor:
+              sys.exit(f"requires-python's floor is {floor}, but this job runs Python {running}")
+          wrong = []
+          # The package's own requirements, without the extras' (tomllib is Python 3.11's).
+          for requirement in [r for r in requires("dlt-hardcharger") if "extra ==" not in r]:
+              # Built metadata orders the specifiers its own way ("dlt[parquet,sqlalchemy]<2,>=1.32.0").
+              name = re.match(r"[A-Za-z0-9_.-]+", requirement).group(0)
+              floor = re.search(r">=([0-9.]+)", requirement).group(1)
+              installed = version(name)
+              print(f"{name}: floor {floor}, installed {installed}")
+              if installed != floor:
+                  wrong.append(name)
+          sys.exit(f"not at their floors: {wrong}" if wrong else 0)
+          PY
+      # The server binary comes from GitHub's release downloads, which answer 5xx now and then
+      # (a 504 failed a whole job on 2026-11-13). Fetch it once, with retries, before the tests:
+      # they then start from the cache, and still fail if no server can be had.
+      - name: Download the Hardcharger server
+        run: |
+          for attempt in 1 2 3 4 5; do
+            if .venv/bin/python -m hardcharger download; then exit 0; fi
+            echo "download failed (attempt $attempt of 5)"
+            sleep $((attempt * 15))
+          done
+          exit 1
+      - name: Unit tests
+        run: .venv/bin/python -m pytest tests/unit
+      - name: Integration tests (a real Hardcharger server)
+        run: .venv/bin/python -m pytest tests/integration
+      - name: README examples (a real Hardcharger server)
+        run: .venv/bin/python scripts/run_readme_examples.py
+
+  build:
+    name: Build
+    needs: [lint, test, lowest]
+    runs-on: ubuntu-24.04-arm
+    outputs:
+      version: ${{ steps.version.outputs.version }}
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          fetch-depth: 0  # the whole history: a release tag must be on main
+      - uses: astral-sh/setup-uv@v10.3.2
+        with:
+          version: ${{ env.UV_VERSION_PIN }}
+      - id: version
+        name: The version, its CHANGELOG section and (on a tag) the tag agree; a tag is on main
+        run: |
+          set -euo pipefail
+          version=$(sed -n 's/^__version__ = "\(.*\)"$/\1/p' dlt_hardcharger/_version.py)
+          if [ -z "$version" ]; then echo "::error::no version in dlt_hardcharger/_version.py"; exit 1; fi
+          if [[ "$GITHUB_REF" == refs/tags/v* ]]; then
+            if [ "v$version" != "$GITHUB_REF_NAME" ]; then
+              echo "::error::tag $GITHUB_REF_NAME but the package version is $version"; exit 1
+            fi
+            git fetch --quiet origin main
+            if ! git merge-base --is-ancestor "$GITHUB_SHA" origin/main; then
+              echo "::error::tag $GITHUB_REF_NAME is on a commit that is not on main"; exit 1
+            fi
+          fi
+          if ! grep -q "^## \[$version\]" CHANGELOG.md; then
+            echo "::error::CHANGELOG.md has no section for $version"; exit 1
+          fi
+          echo "version=$version" >> "$GITHUB_OUTPUT"
+      - name: Build the sdist and wheel
+        run: |
+          uv venv --python 3.14
+          uv pip install build twine
+          .venv/bin/python -m build --sdist --wheel --outdir dist
+          .venv/bin/python -m twine check --strict dist/*
+          ls -l dist
+      - name: The wheel installs into a clean environment and dlt finds the destination by name
+        env:
+          VERSION: ${{ steps.version.outputs.version }}
+        run: |
+          set -euo pipefail
+          uv venv --python 3.10 /tmp/clean
+          uv pip install --python /tmp/clean/bin/python dist/*.whl
+          cd /tmp
+          DLT_DATA_DIR=/tmp/clean-dlt-data /tmp/clean/bin/python - <<'PY'
+          import os
+          import sys
+
+          import dlt
+          from dlt.common.destination import Destination
+
+          assert "dlt_hardcharger" not in sys.modules
+          destination = Destination.from_reference(
+              "hardcharger", credentials="hardcharger://user:password@db.example.com"
+          )
+          import dlt_hardcharger
+
+          assert type(destination) is dlt_hardcharger.hardcharger, type(destination)
+          assert dlt_hardcharger.__version__ == os.environ["VERSION"], dlt_hardcharger.__version__
+          assert destination.capabilities().sqlglot_dialect == "duckdb"
+          print("dlt", dlt.__version__, "finds", destination.destination_type, dlt_hardcharger.__version__)
+          PY
+      - uses: actions/upload-artifact@v7
+        with:
+          name: dist
+          path: dist/
+          retention-days: 7
+
+  # The one check to require in branch protection: red if any job failed or was cancelled.
+  result:
+    name: CI result
+    if: always()
+    needs: [gate, lint, test, lowest, build]
+    runs-on: ubuntu-24.04-arm
+    steps:
+      - env:
+          RESULTS: ${{ join(needs.*.result, ' ') }}
+        run: |
+          echo "results: $RESULTS"
+          case " $RESULTS " in
+            *" failure "* | *" cancelled "*) exit 1 ;;
+          esac
+
+  publish-pypi:
+    name: Publish to PyPI
+    needs: [lint, test, lowest, build]
+    if: github.event_name == 'push' && startsWith(github.ref, 'refs/tags/v')
+    # x64, not Arm: pypa/gh-action-pypi-publish is a container action whose image is built
+    # for linux/amd64 only (on an Arm runner: "exec /app/twine-upload.sh: exec format error").
+    runs-on: ubuntu-24.04
+    environment:
+      name: release
+      url: https://pypi.org/project/dlt-hardcharger/${{ needs.build.outputs.version }}/
+    permissions:
+      id-token: write
+      attestations: write
+    steps:
+      - uses: actions/download-artifact@v8
+        with:
+          name: dist
+          path: dist/
+      - uses: pypa/gh-action-pypi-publish@release/v1
+        with:
+          attestations: true
+
+  release:
+    name: GitHub Release
+    needs: [build, publish-pypi]
+    if: github.event_name == 'push' && startsWith(github.ref, 'refs/tags/v')
+    runs-on: ubuntu-24.04-arm
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/download-artifact@v8
+        with:
+          name: dist
+          path: dist/
+      - name: Release notes from CHANGELOG.md
+        env:
+          VERSION: ${{ needs.build.outputs.version }}
+        run: |
+          set -euo pipefail
+          awk -v ver="$VERSION" '
+            $0 ~ "^## \\[" ver "\\]" { found=1; next }
+            found && /^## \[/ { exit }
+            found { print }
+          ' CHANGELOG.md > release_notes.md
+          if ! [ -s release_notes.md ]; then echo "::error::no CHANGELOG.md section for $VERSION"; exit 1; fi
+          cat release_notes.md
+      - uses: softprops/action-gh-release@v3
+        with:
+          name: v${{ needs.build.outputs.version }}
+          body_path: release_notes.md
+          files: dist/*

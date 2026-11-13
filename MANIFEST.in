@@ -1,0 +1,5 @@
+include CHANGELOG.md LICENSE NOTICE Makefile
+recursive-include docs *.md *.png
+recursive-include scripts *.py
+recursive-include tests *.py
+global-exclude *.py[cod] *.db *.duckdb *.wal *.log
