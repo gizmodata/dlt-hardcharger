@@ -1,0 +1,9 @@
+sqlalchemy-hardcharger
+Copyright 2026 GizmoData LLC
+
+This product includes software developed at GizmoData LLC (https://gizmodata.com).
+
+It builds on SQLAlchemy (https://www.sqlalchemy.org), Copyright 2005-2026 SQLAlchemy authors and
+contributors, MIT License: the dialect subclasses SQLAlchemy's PostgreSQL compilers.
+
+Hardcharger and GizmoData are trademarks of GizmoData LLC.
