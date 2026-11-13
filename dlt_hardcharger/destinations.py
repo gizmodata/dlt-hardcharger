@@ -37,7 +37,8 @@ class hardcharger(_sqlalchemy):  # noqa: N801 (dlt names destination factories i
         caps.supported_merge_strategies = list(MERGE_STRATEGIES)
         caps.type_mapper = HardchargerTypeMapper
         # Parquet files are bulk-loaded as Arrow (HardchargerArrowIngestJob); typed-jsonl files
-        # are sent as INSERT statements, about seventy times slower.
+        # are sent as INSERT statements, hundreds of times slower at a million rows (README,
+        # "Speed").
         caps.preferred_loader_file_format = "parquet"
         return caps
 
