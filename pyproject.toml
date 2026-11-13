@@ -11,7 +11,7 @@ license = "Apache-2.0"
 license-files = ["LICENSE", "NOTICE"]
 # dlt's own range: dlt 1.32.0 declares >=3.10,<3.15.
 requires-python = ">=3.10,<3.15"
-authors = [{ name = "Philip Moore", email = "philip@gizmodata.com" }]
+authors = [{ name = "GizmoData", email = "support@gizmodata.com" }]
 keywords = ["dlt", "data load tool", "destination", "hardcharger", "duckdb", "adbc", "arrow", "chargewire", "etl", "elt"]
 classifiers = [
     "Development Status :: 5 - Production/Stable",
