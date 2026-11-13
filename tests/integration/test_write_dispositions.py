@@ -297,6 +297,6 @@ def test_scd2_keeps_versions_that_a_primary_key_on_the_natural_key_forbids(
         pipeline.run(items([{"id": 1, "v": "A"}]))
     assert 'Duplicate key "id: 1" violates primary key constraint' in str(raised.value)
     # The merge is one transaction: the first version is still the current one.
-    assert query(
-        f"SELECT v, _dlt_valid_to IS NULL FROM {pipeline.dataset_name}.items"
-    ) == [("a", True)]
+    assert query(f"SELECT v, _dlt_valid_to IS NULL FROM {pipeline.dataset_name}.items") == [
+        ("a", True)
+    ]

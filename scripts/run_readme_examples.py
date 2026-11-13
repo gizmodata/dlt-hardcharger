@@ -93,7 +93,7 @@ def main() -> int:
                         if match
                     }
                     if not exports:
-                        print(f"FAIL README.md:{line}: no export NAME=\"value\" line to set")
+                        print(f'FAIL README.md:{line}: no export NAME="value" line to set')
                         failures += 1
                 continue
             if language != "python":
@@ -102,7 +102,9 @@ def main() -> int:
             ran += 1
             configured = secrets is not None or bool(exports)
             if not configured and ADDRESS_IN_EXAMPLES not in code:
-                print(f"FAIL README.md:{line}: the example doesn't connect to {ADDRESS_IN_EXAMPLES}")
+                print(
+                    f"FAIL README.md:{line}: the example doesn't connect to {ADDRESS_IN_EXAMPLES}"
+                )
                 failures += 1
                 continue
             with tempfile.TemporaryDirectory() as temporary:

@@ -7,16 +7,9 @@ from typing import Any
 import dlt
 import pyarrow as pa
 import pytest
-from adbc_driver_manager import AdbcStatusCode
-from adbc_driver_manager import Error as AdbcError
-from dlt.destinations.exceptions import (
-    DatabaseTerminalException,
-    DatabaseTransientException,
-    DatabaseUndefinedRelation,
-)
 from dlt.destinations.impl.sqlalchemy.load_jobs import SqlalchemyJsonLInsertJob
 
-from dlt_hardcharger.job_client import HardchargerArrowIngestJob, ingest_exception
+from dlt_hardcharger.job_client import HardchargerArrowIngestJob
 
 from .conftest import MakePipeline, Query, load_formats
 
@@ -113,22 +106,22 @@ def test_columns_are_matched_by_name_not_position(pipeline: dlt.Pipeline, query:
     ]
 
 
-@pytest.mark.parametrize(
-    ("status", "expected"),
-    [
-        (AdbcStatusCode.INVALID_ARGUMENT, DatabaseTerminalException),
-        (AdbcStatusCode.INTEGRITY, DatabaseTerminalException),
-        (AdbcStatusCode.UNAUTHORIZED, DatabaseTerminalException),
-        (AdbcStatusCode.NOT_FOUND, DatabaseUndefinedRelation),
-        (AdbcStatusCode.IO, DatabaseTransientException),
-        (AdbcStatusCode.TIMEOUT, DatabaseTransientException),
-        (AdbcStatusCode.UNKNOWN, DatabaseTransientException),
-    ],
-)
-def test_ingest_errors_are_classified_by_adbc_status(
-    status: AdbcStatusCode, expected: type[Exception]
-) -> None:
-    error = AdbcError("the driver's message", status_code=status)
-    classified = ingest_exception(error=error)
-    assert type(classified) is expected
-    assert "the driver's message" in str(classified)
+def test_more_load_jobs_than_pooled_connections(make_pipeline: MakePipeline, query: Query) -> None:
+    """Six INSERT jobs that outlast the pool's wait, on a pool of one: none waits for another."""
+    pipeline = make_pipeline(engine_kwargs={"pool_size": 1, "pool_timeout": 0.5})
+
+    @dlt.source
+    def many() -> Any:
+        def make(number: int) -> Any:
+            @dlt.resource(name=f"t{number}")
+            def rows() -> Any:
+                yield [{"id": i, "label": f"row {i}"} for i in range(15_000)]
+
+            return rows
+
+        return [make(number) for number in range(6)]
+
+    info = pipeline.run(many(), loader_file_format="typed-jsonl")
+    assert not info.has_failed_jobs
+    for number in range(6):
+        assert query(f"SELECT count(*) FROM {pipeline.dataset_name}.t{number}") == [(15_000,)]

@@ -136,7 +136,9 @@ tls = "false"
 ```python
 import dlt
 
-pipeline = dlt.pipeline(pipeline_name="from_parts", destination="hardcharger", dataset_name="crm_parts")
+pipeline = dlt.pipeline(
+    pipeline_name="from_parts", destination="hardcharger", dataset_name="crm_parts"
+)
 pipeline.run([{"id": 2, "name": "Grace"}], table_name="contacts")
 print(pipeline.dataset().contacts.select("id", "name").fetchall())
 ```
@@ -344,7 +346,11 @@ pipeline.run(
 )
 
 dataset = pipeline.dataset()
-print(dataset("SELECT city, sum(km) AS km, count(*) AS rides FROM rides GROUP BY ALL ORDER BY city").fetchall())
+print(
+    dataset(
+        "SELECT city, sum(km) AS km, count(*) AS rides FROM rides GROUP BY ALL ORDER BY city"
+    ).fetchall()
+)
 print(dataset.rides.select("city", "km").order_by("km").arrow().to_pydict())
 
 with pipeline.sql_client() as client:
@@ -394,8 +400,9 @@ Arrow bulk ingest (rows go as `INSERT` statements) or the `MERGE INTO` strategie
   default naming makes everything `snake_case`, so nothing collides. With a case-sensitive naming
   convention (`sql_cs_v1`) the case is kept on the server, and a table with both `Name` and `name`
   is refused by dlt before anything is created ("Destination is case insensitive").
-- **dlt's files are loaded one transaction each**, twenty at a time by default (`load.workers`).
-  A failed file leaves nothing behind. A value the table can't hold (a number out of range, a
+- **dlt's files are loaded one transaction each**, twenty at a time by default (`load.workers`),
+  each on its own connection: the destination lets SQLAlchemy's pool open as many as dlt asks for
+  (`max_overflow=-1`; pass `engine_kwargs` to choose otherwise). A failed file leaves nothing behind. A value the table can't hold (a number out of range, a
   broken constraint) fails its job at once; a dropped connection is retried.
 - **Unsigned Arrow integers** take the signed type of the same width (dlt's mapping): a `uint32`
   column is an `INTEGER`, and a value above 2,147,483,647 in it is refused. Cast such a column to

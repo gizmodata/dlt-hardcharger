@@ -97,3 +97,21 @@ def test_the_dialect_is_known_before_the_credentials_are() -> None:
     assert HardchargerClientConfiguration().get_dialect_class() is HardchargerDialect
     assert HardchargerClientConfiguration().get_backend_name() == "hardcharger"
     assert HardchargerCredentials().get_dialect_class() is HardchargerDialect
+
+
+def test_the_pool_never_holds_back_dlts_load_workers() -> None:
+    engine = _configuration(credentials="hardcharger://u:p@db.example.com").credentials.engine
+    assert engine is not None
+    assert engine.pool._max_overflow == -1  # type: ignore[attr-defined]
+
+
+def test_pool_settings_given_by_the_user_are_kept() -> None:
+    configuration = HardchargerClientConfiguration(
+        credentials="hardcharger://u:p@db.example.com",  # type: ignore[arg-type]
+        engine_kwargs={"pool_size": 2, "max_overflow": 3},
+    )
+    configuration = configuration._bind_dataset_name(dataset_name="raw")
+    resolved = resolve_configuration(configuration, sections=("destination", "hardcharger"))
+    engine = resolved.credentials.engine
+    assert engine is not None
+    assert (engine.pool.size(), engine.pool._max_overflow) == (2, 3)  # type: ignore[attr-defined]

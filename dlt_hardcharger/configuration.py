@@ -75,6 +75,19 @@ class HardchargerClientConfiguration(SqlalchemyClientConfiguration):
     def get_backend_name(self) -> str:
         return DIALECT_NAME
 
+    def on_resolved(self) -> None:
+        super().on_resolved()
+        credentials = self.credentials
+        if isinstance(credentials, HardchargerCredentials) and not credentials.is_external_engine:
+            # dlt decides how many files load at once (load.workers, 20 by default), each on a
+            # connection of its own. SQLAlchemy's pool would be a second, lower limit: 5
+            # connections and 10 more on demand, then a 30 s wait that fails a load whose jobs
+            # run longer ("QueuePool limit ... reached"). Let the pool open what dlt asks for.
+            engine_kwargs = dict(credentials.engine_kwargs or {})
+            if "poolclass" not in engine_kwargs:
+                engine_kwargs.setdefault("max_overflow", -1)
+            credentials.engine_kwargs = engine_kwargs
+
     def data_location(self) -> str:
         """The server, and the catalog when the URL names one.
 
