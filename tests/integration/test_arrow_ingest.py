@@ -7,6 +7,7 @@ from typing import Any
 import dlt
 import pyarrow as pa
 import pytest
+import sqlalchemy as sa
 from dlt.destinations.impl.sqlalchemy.load_jobs import SqlalchemyJsonLInsertJob
 
 from dlt_hardcharger.job_client import HardchargerArrowIngestJob
@@ -70,6 +71,31 @@ def test_a_large_table_arrives_whole(pipeline: dlt.Pipeline, query: Query) -> No
     assert query(
         f"SELECT count(*), count(DISTINCT id), sum(id) FROM {pipeline.dataset_name}.big"
     ) == [(rows, rows, rows * (rows - 1) // 2)]
+
+
+def test_a_job_that_fails_after_its_ingest_leaves_nothing(
+    pipeline: dlt.Pipeline, query: Query
+) -> None:
+    """The ingest is the first thing a load job does in its transaction, with no SQL statement
+    before it: the transaction must already be open on the server, or a failed (and then
+    retried) job would leave its rows behind and load them twice."""
+    dataset = pipeline.dataset_name
+    pipeline.run(pa.table({"id": pa.array([0], type=pa.int64())}), table_name="t")
+    rows = 200_000  # enough for the driver to send it in several parts
+    data = pa.table({"id": pa.array(range(1, rows + 1), type=pa.int64())})
+    table = sa.Table("t", sa.MetaData(), sa.Column("id", sa.BigInteger), schema=dataset)
+    with pipeline.sql_client() as client:
+        with pytest.raises(RuntimeError, match="after its ingest"), client.begin_transaction():
+            ingested = HardchargerArrowIngestJob._ingest(
+                connection=client.native_connection,
+                table=table,
+                data=data.to_reader(max_chunksize=20_000),
+            )
+            assert ingested == rows
+            # Another session sees none of it before the transaction ends.
+            assert query(f"SELECT count(*) FROM {dataset}.t") == [(1,)]
+            raise RuntimeError("the job fails after its ingest")
+    assert query(f"SELECT count(*) FROM {dataset}.t") == [(1,)]
 
 
 def test_many_files_load_at_once(make_pipeline: MakePipeline, query: Query) -> None:

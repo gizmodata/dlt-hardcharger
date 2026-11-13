@@ -31,6 +31,10 @@ on:
   # branch protection, and a required check that never reports would block the merge.
   pull_request:
   workflow_dispatch:
+  # Weekly, with whatever dlt and SQLAlchemy are newest that day: the destination builds on dlt
+  # classes that are not a promised API, so a dlt release can break it without a commit here.
+  schedule:
+    - cron: "23 6 * * 1"
 
 permissions:
   contents: read

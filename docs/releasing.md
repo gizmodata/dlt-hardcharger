@@ -45,5 +45,6 @@ is on PyPI: changed artifacts need a new version.
 
 The destination subclasses dlt's SQLAlchemy destination, so a dlt release can change what it
 builds on. CI installs the newest dlt the requirement allows on every run, and the
-lowest-versions job installs dlt 1.32.0: a red main after a dlt release is the signal. Fix
+lowest-versions job installs dlt 1.32.0; a weekly scheduled run does the same without a commit:
+a red run after a dlt release is the signal. Fix
 forward and release a patch; raise the floor only when the old dlt can no longer be supported.
