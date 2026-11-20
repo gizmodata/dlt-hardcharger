@@ -6,6 +6,15 @@ All notable changes to this project are documented here. The format follows
 
 ## [Unreleased]
 
+## [1.0.1] - 2026-11-20
+
+### Fixed
+
+- Keep `sqlalchemy-hardcharger` below 1.2 until this destination's profile configuration
+  migrates to explicit `connect_args`. SQLAlchemy dialect 1.2 refuses profiles in URLs;
+  allowing it before that migration would break existing `hardcharger://?profile=...`
+  configurations on dependency upgrades.
+
 ## [1.0.0] - 2026-11-13
 
 ### Added
