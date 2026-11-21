@@ -87,9 +87,28 @@ def test_a_url_without_a_host_is_refused() -> None:
     assert "DESTINATION__HARDCHARGER__CREDENTIALS" in str(raised.value)
 
 
-def test_a_connection_profile_needs_no_host() -> None:
-    configuration = _configuration(credentials="hardcharger://?profile=warehouse")
-    assert configuration.credentials.query == {"profile": "warehouse"}
+@pytest.mark.parametrize("key", ["profile", "PROFILE", "Profile", "%70rofile"])
+@pytest.mark.parametrize("host", ["", "untrusted.example"])
+def test_a_url_cannot_select_a_local_profile(key: str, host: str) -> None:
+    with pytest.raises(ConfigurationValueError, match="'profile' can't be set in a URL"):
+        _configuration(credentials=f"hardcharger://{host}?{key}=warehouse")
+
+
+@pytest.mark.parametrize("on_credentials", [False, True])
+def test_a_trusted_connection_profile_needs_no_host(on_credentials: bool) -> None:
+    kwargs = {"connect_args": {"profile": "warehouse"}}
+    credentials = HardchargerCredentials("hardcharger://")
+    if on_credentials:
+        credentials.engine_kwargs = kwargs
+    configuration = HardchargerClientConfiguration(
+        credentials=credentials, engine_kwargs={} if on_credentials else kwargs
+    )._bind_dataset_name(dataset_name="raw")
+    resolved = resolve_configuration(configuration, sections=("destination", "hardcharger"))
+    assert resolved.credentials.query == {}
+    assert resolved.credentials.engine_kwargs["connect_args"] == {"profile": "warehouse"}
+    assert resolved.data_location() == "hardcharger://"
+    # Constructing the real dialect must accept the hostless URL, without opening the profile.
+    assert resolved.credentials.engine is not None
 
 
 def test_the_dialect_is_known_before_the_credentials_are() -> None:

@@ -37,9 +37,8 @@ dependencies = [
     "dlt[sqlalchemy,parquet]>=1.32.0,<2",
     # The hardcharger:// dialect; brings SQLAlchemy 2.0/2.1 and adbc-driver-hardcharger, whose
     # Arrow bulk ingest loads the files (and with it adbc-driver-manager and pyarrow).
-    # 1.2 makes profiles code-only; keep existing profile URLs working until the
-    # destination's connect_args migration ships with a 1.2 floor.
-    "sqlalchemy-hardcharger>=1.1.0,<1.2",
+    # 1.2 allows a hostless URL when the application supplies a profile in connect_args.
+    "sqlalchemy-hardcharger>=1.2.0,<2",
 ]
 
 [project.optional-dependencies]
