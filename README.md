@@ -172,6 +172,12 @@ print(pipeline.dataset().contacts.select("id", "name").fetchall())
 and the other URL options are the dialect's: see
 [its README](https://github.com/gizmodata/sqlalchemy-hardcharger#the-url).
 
+Connection profiles are configured explicitly, never through `?profile=` in a URL. Use
+`credentials="hardcharger://"` together with
+`engine_kwargs={"connect_args": {"profile": "warehouse"}}` to select a local profile.
+TLS file paths also belong in `engine_kwargs["connect_args"]`. These options are trusted
+application configuration; do not construct them from an untrusted connection URL.
+
 ## Write dispositions
 
 All three, with every strategy dlt has for them:

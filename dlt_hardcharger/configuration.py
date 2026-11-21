@@ -46,13 +46,10 @@ class HardchargerCredentials(SqlalchemyCredentials):
                 f"The hardcharger destination takes a hardcharger:// URL, not `{backend}://`."
                 " Use dlt.destinations.sqlalchemy for other databases."
             )
-        if not self.host and "profile" not in (self.query or {}):
+        if any(key.casefold() == "profile" for key in (self.query or {})):
             raise ConfigurationValueError(
-                "The hardcharger destination has no server to connect to. Give it a"
-                " hardcharger://user:password@host[:port][/catalog] URL: as"
-                " credentials=... to dlt_hardcharger.hardcharger(), in the environment variable"
-                " DESTINATION__HARDCHARGER__CREDENTIALS, or as credentials under"
-                " [destination.hardcharger] in .dlt/secrets.toml."
+                "'profile' can't be set in a URL. Pass it through"
+                " engine_kwargs={'connect_args': {'profile': ...}} instead."
             )
 
 
@@ -79,6 +76,18 @@ class HardchargerClientConfiguration(SqlalchemyClientConfiguration):
         super().on_resolved()
         credentials = self.credentials
         if isinstance(credentials, HardchargerCredentials) and not credentials.is_external_engine:
+            # The parent's on_resolved copies destination-level engine_kwargs into the
+            # credentials. Only now can we tell whether a hostless URL has a trusted profile.
+            connect_args = (credentials.engine_kwargs or {}).get("connect_args", {})
+            if not credentials.host and not connect_args.get("profile"):
+                raise ConfigurationValueError(
+                    "The hardcharger destination has no server to connect to. Give it a"
+                    " hardcharger://user:password@host[:port][/catalog] URL: as"
+                    " credentials=... to dlt_hardcharger.hardcharger(), in the environment variable"
+                    " DESTINATION__HARDCHARGER__CREDENTIALS, or as credentials under"
+                    " [destination.hardcharger] in .dlt/secrets.toml. Alternatively, pass a"
+                    " profile through engine_kwargs={'connect_args': {'profile': ...}}."
+                )
             # dlt decides how many files load at once (load.workers, 20 by default), each on a
             # connection of its own. SQLAlchemy's pool would be a second, lower limit: 5
             # connections and 10 more on demand, then a 30 s wait that fails a load whose jobs
@@ -96,6 +105,12 @@ class HardchargerClientConfiguration(SqlalchemyClientConfiguration):
         session works in the server's default catalog.
         """
         server = self._server_location()
+        if self.credentials and not server:
+            # A trusted profile (or supplied Engine) resolves the endpoint when connecting.
+            # Do not read local profiles just to produce dlt's informational trace location.
+            connect_args = (self.credentials.engine_kwargs or {}).get("connect_args", {})
+            if self.credentials.is_external_engine or connect_args.get("profile"):
+                return f"{DIALECT_NAME}://"
         if not self.credentials or not server:
             self._no_data_location("the configuration has no host")
         location = f"{DIALECT_NAME}://{server}"

@@ -6,6 +6,17 @@ All notable changes to this project are documented here. The format follows
 
 ## [Unreleased]
 
+## [1.1.0] - 2026-11-21
+
+### Security
+
+- Connection URLs cannot select a local ADBC profile. Pass a profile explicitly through
+  `engine_kwargs={"connect_args": {"profile": "warehouse"}}`, with credentials `hardcharger://`.
+  The destination also accepts these engine arguments on `HardchargerCredentials`. Host validation
+  runs after the engine arguments are resolved; profile-only destinations report `hardcharger://`
+  as their trace location without opening a local profile. Requires sqlalchemy-hardcharger 1.2.0,
+  which also keeps TLS file paths and shared sign-in identities out of URLs.
+
 ## [1.0.1] - 2026-11-20
 
 ### Fixed
